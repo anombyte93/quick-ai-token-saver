@@ -31,13 +31,26 @@ If you use AI daily with images, this adds up to **hundreds of dollars** in savi
 
 2. **Run the script:**
 
+   **Mode 1 (Clipboard to Clipboard)** - Default mode, shows savings without modifying clipboard:
    ```bash
    python quick_saver.py
    ```
 
-3. **Take screenshots or copy images** - the tool automatically shows potential savings
+   **Mode 2 (Save to Folder)** - Saves optimized images and copies file path to clipboard:
+   ```bash
+   python quick_saver.py --mode 2
+   ```
 
-4. **Reset your stats anytime** by typing `reset` and pressing Enter
+   With custom folder:
+   ```bash
+   python quick_saver.py --mode 2 --folder "C:/my_images"
+   ```
+
+3. **Take screenshots or copy images**:
+   - Mode 1: Shows potential savings, keeps original in clipboard
+   - Mode 2: Saves optimized WEBP to folder, copies file path to clipboard for pasting into Claude Code
+
+4. **Reset your stats anytime** with `--reset` flag
 
 ## Example output
 
@@ -52,9 +65,22 @@ If you use AI daily with images, this adds up to **hundreds of dollars** in savi
 
 ## Commands
 
-- **Start**: `python quick_saver.py`
-- **Reset stats at startup**: `python quick_saver.py reset`
-- **Reset while running**: Type `reset` + Enter
+- **Mode 1 (default)**: `python quick_saver.py`
+- **Mode 2 (save & copy path)**: `python quick_saver.py --mode 2`
+- **Custom save folder**: `python quick_saver.py --mode 2 --folder "C:/my_folder"`
+- **Reset stats**: `python quick_saver.py --reset`
 - **Stop**: Ctrl+C
+
+## Mode Details
+
+**Mode 1**: Best for direct AI chat interfaces where you paste images
+- Keeps original image in clipboard
+- Shows token savings calculations only
+
+**Mode 2**: Perfect for Claude Code and file-based AI tools
+- Saves optimized WEBP to disk
+- Automatically converts Windows paths to WSL format
+- Copies WSL-compatible file path to clipboard
+- You paste the path into Claude Code to share the image
 
 That's it! Start seeing how much you could save on AI image costs.

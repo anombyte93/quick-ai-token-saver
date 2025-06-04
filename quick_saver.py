@@ -1,13 +1,15 @@
-import time, io, os, json, hashlib, sys, threading
+import time, io, os, json, hashlib, sys, threading, argparse
 from PIL import ImageGrab, Image
 import win32clipboard
+from datetime import datetime
 
 # --- Config ---
 WEBP_QUALITY = 80  # Good balance for token savings
 TOKEN_COST_PER_1K = 0.003
 LOG_PATH = os.path.expanduser("~/.ai_image_token_saver/quick_log.json")
+CACHE_FOLDER = os.path.expanduser("~/.ai_image_token_saver/cache")
 
-# --- Clipboard Writer ---
+# --- Clipboard Operations ---
 def copy_image_to_clipboard(image):
     output = io.BytesIO()
     image.convert("RGB").save(output, format='BMP')
@@ -18,6 +20,24 @@ def copy_image_to_clipboard(image):
     win32clipboard.EmptyClipboard()
     win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
     win32clipboard.CloseClipboard()
+
+def copy_text_to_clipboard(text):
+    win32clipboard.OpenClipboard()
+    win32clipboard.EmptyClipboard()
+    win32clipboard.SetClipboardData(win32clipboard.CF_TEXT, text.encode())
+    win32clipboard.SetClipboardData(win32clipboard.CF_UNICODETEXT, text)
+    win32clipboard.CloseClipboard()
+
+def convert_to_wsl_path(windows_path):
+    """Convert Windows path to WSL format for Claude Code compatibility"""
+    # Convert C:\path\to\file to /mnt/c/path/to/file
+    if ':' in windows_path and '\\' in windows_path:
+        # Replace drive letter (C:) with /mnt/c
+        drive_letter = windows_path[0].lower()
+        path_without_drive = windows_path[2:]  # Remove "C:"
+        wsl_path = f"/mnt/{drive_letter}" + path_without_drive.replace('\\', '/')
+        return wsl_path
+    return windows_path
 
 # --- Token Estimation ---
 def estimate_tokens(image_bytes):
@@ -60,34 +80,61 @@ def reset_stats():
     print("📈 New total: 0 tokens ($0.0000)")
     return stats
 
-# --- Input handler thread ---
-reset_requested = False
-
-def input_handler():
-    """Handle reset commands in a separate thread"""
-    global reset_requested
-    while True:
-        try:
-            user_input = input().strip().lower()
-            if user_input == 'reset' or user_input == 'r':
-                reset_requested = True
-        except:
-            break
+# --- File Operations ---
+def save_image_to_cache(image, cache_folder, format="WEBP", quality=WEBP_QUALITY):
+    """Save image to cache folder and return the file path"""
+    os.makedirs(cache_folder, exist_ok=True)
+    
+    # Generate filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    extension = format.lower()
+    filename = f"img_{timestamp}.{extension}"
+    filepath = os.path.join(cache_folder, filename)
+    
+    # Save image
+    if format == "WEBP":
+        image.save(filepath, format=format, quality=quality)
+    else:
+        image.save(filepath, format=format)
+    
+    return filepath
 
 # --- Main Loop ---
 def main():
-    # Check for reset command
-    if len(sys.argv) > 1 and sys.argv[1] == "reset":
+    global CACHE_FOLDER
+    
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="Clipboard Image Token Saver")
+    parser.add_argument("--mode", type=int, choices=[1, 2], default=1,
+                       help="Mode 1: Clipboard to clipboard (default), Mode 2: Save to folder and copy path")
+    parser.add_argument("--folder", type=str, default=CACHE_FOLDER,
+                       help="Folder to save images in mode 2 (default: ~/.ai_image_token_saver/cache)")
+    parser.add_argument("--reset", action="store_true", help="Reset token statistics")
+    
+    args = parser.parse_args()
+    
+    # Handle reset
+    if args.reset:
         reset_stats()
         return
+    
+    # Update cache folder if custom folder provided
+    if args.mode == 2 and args.folder != CACHE_FOLDER:
+        CACHE_FOLDER = os.path.expanduser(args.folder)
     
     last_processed_hash = ""
     last_processed_time = 0
     stats = load_log()
     
-    print("🖼 Clipboard Image Optimizer running (Windows)... Press Ctrl+C to stop.")
-    print(f"🎯 Converting ALL images to WEBP {WEBP_QUALITY}% for token savings")
-    print(f"💡 Run with 'python quick_saver.py reset' to reset token stats")
+    print(f"🖼 Clipboard Image Optimizer running (Mode {args.mode})... Press Ctrl+C to stop.")
+    if args.mode == 1:
+        print(f"📋 Mode 1: Converting clipboard images to WEBP for token savings")
+    else:
+        print(f"💾 Mode 2: Saving images to folder and copying file path")
+        print(f"📁 Save folder: {CACHE_FOLDER}")
+    
+    print(f"🎯 Using WEBP {WEBP_QUALITY}% quality for optimal token savings")
+    print(f"💡 Run with '--reset' to reset token stats")
     print(f"📊 Current total saved: {stats['original_tokens'] - stats['optimized_tokens']:,} tokens")
 
     while True:
@@ -97,7 +144,6 @@ def main():
             if isinstance(img, Image.Image):
                 current_hash = hash_image(img)
                 current_time = time.time()
-                
                 # Only process if it's a genuinely new image (different content AND enough time passed)
                 if current_hash != last_processed_hash and (current_time - last_processed_time) > 3:
                     w, h = img.size
@@ -125,15 +171,29 @@ def main():
                         total_saved = stats["original_tokens"] - stats["optimized_tokens"]
                         total_dollars = total_saved / 1000 * TOKEN_COST_PER_1K
                         
-                        # Don't modify clipboard - just show savings
-                        # (Clipboard format conversion was causing the double-processing)
-                        last_processed_hash = current_hash
-                        last_processed_time = current_time
+                        if args.mode == 1:
+                            # Mode 1: Keep in clipboard (current behavior)
+                            last_processed_hash = current_hash
+                            last_processed_time = current_time
+                            
+                            print(f"✅ WEBP would be: {w}×{h} pixels (same size, compressed)")
+                            print(f"📦 Would save: {tokens_saved:,} tokens (~${dollars_saved:.4f})")
+                            print(f"📈 Total calculated savings: {total_saved:,} tokens (~${total_dollars:.4f})")
+                            print(f"💡 Image ready to paste - already optimized in calculation!")
                         
-                        print(f"✅ WEBP would be: {w}×{h} pixels (same size, compressed)")
-                        print(f"📦 Would save: {tokens_saved:,} tokens (~${dollars_saved:.4f})")
-                        print(f"📈 Total calculated savings: {total_saved:,} tokens (~${total_dollars:.4f})")
-                        print(f"💡 Image ready to paste - already optimized in calculation!")
+                        else:
+                            # Mode 2: Save to folder and copy path
+                            filepath = save_image_to_cache(img, CACHE_FOLDER, format="WEBP", quality=WEBP_QUALITY)
+                            wsl_filepath = convert_to_wsl_path(filepath)
+                            copy_text_to_clipboard(wsl_filepath)
+                            
+                            last_processed_hash = current_hash
+                            last_processed_time = current_time
+                            
+                            print(f"✅ Saved as WEBP: {filepath}")
+                            print(f"📋 WSL path copied: {wsl_filepath}")
+                            print(f"📦 Saved: {tokens_saved:,} tokens (~${dollars_saved:.4f})")
+                            print(f"📈 Total saved: {total_saved:,} tokens (~${total_dollars:.4f})")
                     else:
                         print(f"⚠️  No token savings from WEBP conversion")
                         last_processed_hash = current_hash
